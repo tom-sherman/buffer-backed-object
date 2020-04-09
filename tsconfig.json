@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "lib": [
+      "DOM",
+      "ESNext",
+      "ES5"
+    ],
+    "strict": true,
+    "noImplicitAny": true
+  }
+}

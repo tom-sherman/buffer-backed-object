@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2020 Google Inc. All Rights Reserved.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -11,15 +11,25 @@
  * limitations under the License.
  */
 
+type Descriptor<T> = {
+  size: number,
+  get: (dataView: DataView, byteOffset: number) => T,
+  set: (dataView: DataView, byteOffset: number, value: T) => void
+}
+
+type Struct = Record<string | number | symbol, Descriptor<unknown>>
+
+type StructWithOffets = Record<string | number | symbol, Descriptor<unknown> & {offset: number}>
+
 // Like `isNaN` but returns `true` for symbols.
-function betterIsNaN(s) {
+function betterIsNaN(s: symbol | number | string): s is string | symbol {
   if (typeof s === "symbol") {
     return true;
   }
-  return isNaN(s);
+  return isNaN(s as number);
 }
 
-export function structSize(descriptors) {
+export function structSize(descriptors: Struct): number {
   let stride = 0;
   for (const { size } of Object.values(descriptors)) {
     stride += size;
@@ -28,15 +38,15 @@ export function structSize(descriptors) {
 }
 
 export function ArrayOfBufferBackedObjects(
-  buffer,
-  descriptors,
+  buffer: ArrayBuffer,
+  struct: Struct,
   { byteOffset = 0, length = 0 } = {}
 ) {
   const dataView = new DataView(buffer, byteOffset);
   // Accumulate the size of one struct
   let stride = 0;
   // Copy
-  descriptors = Object.assign({}, descriptors);
+  const descriptors: StructWithOffets = Object.assign({}, struct as any);
   for (const [name, descriptor] of Object.entries(descriptors)) {
     // Copy second layer and add offset property
     descriptors[name] = Object.assign({}, descriptor, { offset: stride });
@@ -69,7 +79,7 @@ export function ArrayOfBufferBackedObjects(
         }
         return prop;
       }
-      const idx = parseInt(propName);
+      const idx = parseInt(propName as any);
       const itemOffset = idx * stride;
       // Just like real arrays, we return `undefined`
       // outside the boundaries.
@@ -103,15 +113,18 @@ export function ArrayOfBufferBackedObjects(
   });
 }
 
+export interface BufferBackedObject {
+  [x: string]: () => Descriptor<unknown>;
+}
 export function BufferBackedObject(
-  buffer,
-  descriptors,
+  buffer: ArrayBuffer,
+  descriptors: Struct,
   { byteOffset = 0 } = {}
 ) {
   return ArrayOfBufferBackedObjects(buffer, descriptors, { byteOffset })[0];
 }
 
-[
+([
   "Uint16",
   "Uint32",
   "Int16",
@@ -120,7 +133,7 @@ export function BufferBackedObject(
   "Float64",
   "BigInt64",
   "BigUint64",
-].forEach((name) => {
+] as const).forEach((name) => {
   BufferBackedObject[name] = ({ endianess = "big" } = {}) => {
     if (endianess !== "big" && endianess !== "little") {
       throw Error("Endianess needs to be either 'big' or 'little'");
@@ -136,19 +149,21 @@ export function BufferBackedObject(
   };
 });
 
-BufferBackedObject.Uint8 = () => ({
+BufferBackedObject.Uint8 = (): Descriptor<number> => ({
   size: 1,
   get: (dataView, byteOffset) => dataView.getUint8(byteOffset),
   set: (dataView, byteOffset, value) => dataView.setUint8(byteOffset, value),
 });
 
-BufferBackedObject.Int8 = () => ({
+let v: DataView
+
+BufferBackedObject.Int8 = (): Descriptor<number> => ({
   size: 1,
   get: (dataView, byteOffset) => dataView.getInt8(byteOffset),
   set: (dataView, byteOffset, value) => dataView.setInt8(byteOffset, value),
 });
 
-BufferBackedObject.ArrayBuffer = (size) => ({
+BufferBackedObject.ArrayBuffer = (size: number): Descriptor<ArrayBuffer> => ({
   size,
   get: (dataView, byteOffset) =>
     dataView.buffer.subarray(byteOffset, byteOffset + size),
@@ -188,7 +203,7 @@ BufferBackedObject.NestedArrayOfBufferBackedObjects = (length, descriptors) => {
   };
 };
 
-BufferBackedObject.UTF8String = (maxBytes) => {
+BufferBackedObject.UTF8String = (maxBytes: number): Descriptor<string> => {
   return {
     size: maxBytes,
     get: (dataView, byteOffset) =>
@@ -204,6 +219,6 @@ BufferBackedObject.UTF8String = (maxBytes) => {
   };
 };
 
-BufferBackedObject.reserved = (size) => ({ size });
+BufferBackedObject.reserved = (size: number) => ({ size });
 
 export default BufferBackedObject;
